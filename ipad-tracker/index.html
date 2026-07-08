@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Fleet Tracker</title>
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: #0f172a;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    overflow: hidden; user-select: none;
+  }
+  #wrap {
+    height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; color: #e2e8f0; text-align: center;
+    padding: 24px;
+  }
+  .dot {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #64748b; margin-bottom: 20px;
+    transition: background 0.3s ease;
+  }
+  .dot.ok { background: #22c55e; box-shadow: 0 0 16px 4px rgba(34,197,94,0.5); }
+  .dot.err { background: #ef4444; box-shadow: 0 0 16px 4px rgba(239,68,68,0.5); }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 8px; }
+  p { font-size: 14px; color: #94a3b8; margin: 4px 0; }
+  #deviceName { font-size: 16px; color: #cbd5e1; margin-top: 16px; font-weight: 500; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div class="dot" id="statusDot"></div>
+  <h1 id="statusText">Starting…</h1>
+  <p id="lastReport">No reports sent yet</p>
+  <p id="deviceName"></p>
+</div>
+
+<script>
+// ============================================================
+// CONFIG — set these before installing on each iPad
+// ============================================================
+const API_BASE_URL = "https://YOUR-BACKEND.onrender.com"; // <- replace after Step 4 deploy
+const REPORT_INTERVAL_MS = 2 * 60 * 1000; // every 2 minutes
+
+// Each iPad gets its own token via the URL, e.g.:
+// https://fleet.yourcompany.com/?token=89ecf993-8551-464e-8b1b-7cfb5bed9e8f
+const params = new URLSearchParams(window.location.search);
+const DEVICE_TOKEN = params.get("token");
+
+// Persist the token across relaunches so the URL doesn't need to be re-typed
+// if this page is added to Home Screen with a plain bookmark.
+if (DEVICE_TOKEN) {
+  localStorage.setItem("device_token", DEVICE_TOKEN);
+}
+const TOKEN = DEVICE_TOKEN || localStorage.getItem("device_token");
+
+const statusDot = document.getElementById("statusDot");
+const statusText = document.getElementById("statusText");
+const lastReport = document.getElementById("lastReport");
+const deviceNameEl = document.getElementById("deviceName");
+
+function setStatus(state, text) {
+  statusDot.className = "dot" + (state ? " " + state : "");
+  statusText.textContent = text;
+}
+
+if (!TOKEN) {
+  setStatus("err", "Not configured");
+  lastReport.textContent = "Open this page once using the link provided for this iPad.";
+} else {
+  deviceNameEl.textContent = "Device linked";
+  setStatus("", "Tracking active");
+  startReporting();
+}
+
+// Queue failed reports locally and retry them alongside the next report,
+// so a dead zone in cellular coverage doesn't just lose data.
+function getQueue() {
+  try { return JSON.parse(localStorage.getItem("ping_queue") || "[]"); }
+  catch { return []; }
+}
+function saveQueue(q) {
+  localStorage.setItem("ping_queue", JSON.stringify(q.slice(-200))); // cap so storage can't grow unbounded
+}
+
+async function sendPing(payload) {
+  const res = await fetch(`${API_BASE_URL}/checkin/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Server rejected check-in: " + res.status);
+}
+
+async function flushQueue() {
+  const queue = getQueue();
+  if (queue.length === 0) return;
+  const remaining = [];
+  for (const item of queue) {
+    try { await sendPing(item); }
+    catch { remaining.push(item); }
+  }
+  saveQueue(remaining);
+}
+
+async function reportOnce() {
+  if (!navigator.geolocation) {
+    setStatus("err", "Location not supported");
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const payload = {
+        device_token: TOKEN,
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy_m: pos.coords.accuracy,
+      };
+      try {
+        await flushQueue();
+        await sendPing(payload);
+        setStatus("ok", "Tracking active");
+        lastReport.textContent = "Last report: " + new Date().toLocaleTimeString();
+      } catch (e) {
+        // Network/server issue -- queue it and try again next cycle
+        const q = getQueue();
+        q.push(payload);
+        saveQueue(q);
+        setStatus("err", "Offline — queued (" + q.length + ")");
+      }
+    },
+    (err) => {
+      setStatus("err", "Location permission needed");
+      lastReport.textContent = err.message;
+    },
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 }
+  );
+}
+
+function startReporting() {
+  reportOnce(); // first report immediately
+  setInterval(reportOnce, REPORT_INTERVAL_MS);
+}
+
+// Keep the screen awake where supported (Guided Access + Auto-Lock:Never
+// handle this on iOS, but this helps on other devices too)
+if ("wakeLock" in navigator) {
+  navigator.wakeLock.request("screen").catch(() => {});
+}
+</script>
+</body>
+</html>
