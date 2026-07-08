@@ -123,7 +123,12 @@ def main():
     parser.add_argument("--tracker-url", default=os.getenv("TRACKER_PAGE_URL", ""),
                          help="Base URL of the deployed iPad tracker page, e.g. https://fleet-tracker-ipad.onrender.com")
     parser.add_argument("--output", default="jamf_sync_results.csv", help="Where to write the serial->URL mapping")
+    parser.add_argument("--exclude-name", default="", help="Comma-separated substrings; Jamf devices whose name contains any of these (case-insensitive) are skipped, e.g. --exclude-name 'demo,test'")
+    parser.add_argument("--exclude-serial", default="", help="Comma-separated exact serial numbers to skip")
     args = parser.parse_args()
+
+    exclude_name_terms = [s.strip().lower() for s in args.exclude_name.split(",") if s.strip()]
+    exclude_serials = {s.strip() for s in args.exclude_serial.split(",") if s.strip()}
 
     require_config()
 
@@ -151,6 +156,18 @@ def main():
         serial = d["serial"]
         if not serial:
             print(f"  Skipping a Jamf device with no serial number (name={d['name']})")
+            continue
+
+        if serial in exclude_serials:
+            print(f"  Excluded by --exclude-serial: {serial} ({d['name']})")
+            rows.append({"serial_number": serial, "jamf_name": d["name"], "status": "excluded",
+                         "device_token": "", "tracking_url": ""})
+            continue
+
+        if any(term in d["name"].lower() for term in exclude_name_terms):
+            print(f"  Excluded by --exclude-name: {serial} ({d['name']})")
+            rows.append({"serial_number": serial, "jamf_name": d["name"], "status": "excluded",
+                         "device_token": "", "tracking_url": ""})
             continue
 
         if serial in existing_names:
