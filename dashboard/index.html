@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fleet Tracker</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-primary: #0b1220;
+    --bg-panel: #131b2e;
+    --bg-panel-hover: #182238;
+    --border: #1f2937;
+    --accent-live: #34d399;
+    --accent-stale: #f59e0b;
+    --accent-focus: #38bdf8;
+    --text-primary: #e2e8f0;
+    --text-muted: #94a3b8;
+    --text-dim: #5b6b85;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    height: 100vh;
+    overflow: hidden;
+  }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  /* ---------- Login screen ---------- */
+  #loginScreen {
+    height: 100vh; display: flex; align-items: center; justify-content: center;
+  }
+  .login-card {
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 40px; width: 340px;
+  }
+  .login-card h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  .login-card .sub { color: var(--text-muted); font-size: 13px; margin-bottom: 28px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .field input {
+    width: 100%; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; color: var(--text-primary); font-size: 14px; font-family: inherit;
+  }
+  .field input:focus { outline: none; border-color: var(--accent-focus); }
+  .btn-primary {
+    width: 100%; background: var(--accent-focus); color: #0b1220; border: none; border-radius: 6px;
+    padding: 11px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 8px;
+  }
+  .btn-primary:hover { opacity: 0.9; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .error-msg { color: #f87171; font-size: 13px; margin-top: 12px; }
+
+  /* ---------- Main app ---------- */
+  #app { display: none; height: 100vh; flex-direction: column; }
+  #app.active { display: flex; }
+
+  header {
+    height: 56px; border-bottom: 1px solid var(--border); display: flex; align-items: center;
+    padding: 0 20px; gap: 20px; flex-shrink: 0; background: var(--bg-panel);
+  }
+  header h1 { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+  .header-stat { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+  .header-stat .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-live); }
+  header .spacer { flex: 1; }
+  .btn-ghost {
+    background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+    border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; font-family: inherit;
+  }
+  .btn-ghost:hover { border-color: var(--text-muted); color: var(--text-primary); }
+
+  .layout { flex: 1; display: flex; overflow: hidden; }
+
+  /* ---------- Sidebar / manifest ---------- */
+  #sidebar { width: 320px; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: var(--bg-panel); }
+  .sidebar-search { padding: 14px; border-bottom: 1px solid var(--border); }
+  .sidebar-search input {
+    width: 100%; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; color: var(--text-primary); font-size: 13px; font-family: inherit;
+  }
+  .sidebar-search input:focus { outline: none; border-color: var(--accent-focus); }
+  #deviceList { flex: 1; overflow-y: auto; }
+  .device-row {
+    padding: 12px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.15s;
+  }
+  .device-row:hover { background: var(--bg-panel-hover); }
+  .device-row.selected { background: var(--bg-panel-hover); border-left: 2px solid var(--accent-focus); }
+  .device-row-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .status-dot.online { background: var(--accent-live); box-shadow: 0 0 0 3px rgba(52,211,153,0.15); animation: pulse 2s infinite; }
+  .status-dot.offline { background: var(--accent-stale); }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 3px rgba(52,211,153,0.15); } 50% { box-shadow: 0 0 0 5px rgba(52,211,153,0.08); } }
+  .device-name { font-size: 13px; font-weight: 600; }
+  .device-meta { font-size: 11px; color: var(--text-dim); padding-left: 16px; }
+  #emptyState { padding: 40px 20px; text-align: center; color: var(--text-dim); font-size: 13px; }
+
+  /* ---------- Map ---------- */
+  #map { flex: 1; background: #0b1220; }
+  .leaflet-popup-content-wrapper { background: var(--bg-panel); color: var(--text-primary); border-radius: 8px; }
+  .leaflet-popup-tip { background: var(--bg-panel); }
+  .leaflet-popup-content { font-family: 'Inter', sans-serif; font-size: 12px; margin: 10px 12px; }
+  .popup-title { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+  .popup-row { color: var(--text-muted); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="login-card">
+    <h1>Fleet Tracker</h1>
+    <div class="sub">Sign in to view live vehicle locations</div>
+    <div class="field">
+      <label>Username</label>
+      <input type="text" id="loginUsername" autocomplete="username">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="loginPassword" autocomplete="current-password">
+    </div>
+    <button class="btn-primary" id="loginBtn">Sign in</button>
+    <div class="error-msg" id="loginError" style="display:none;"></div>
+  </div>
+</div>
+
+<div id="app">
+  <header>
+    <h1>Fleet Tracker</h1>
+    <div class="header-stat"><span class="dot" id="onlineDot"></span><span id="onlineCount">0 online</span></div>
+    <div class="header-stat mono" id="lastRefresh">--</div>
+    <div class="spacer"></div>
+    <button class="btn-ghost" id="logoutBtn">Sign out</button>
+  </header>
+  <div class="layout">
+    <div id="sidebar">
+      <div class="sidebar-search">
+        <input type="text" id="searchInput" placeholder="Search by name...">
+      </div>
+      <div id="deviceList"></div>
+    </div>
+    <div id="map"></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ============================================================
+// CONFIG
+// ============================================================
+const API_BASE_URL = "https://fleet-tracker-008a.onrender.com"; // <- replace with your live backend URL
+const REFRESH_INTERVAL_MS = 15000;
+
+let token = sessionStorage.getItem("fleet_token") || null;
+let devices = [];
+let markers = {};
+let selectedDeviceId = null;
+let map = null;
+let refreshTimer = null;
+
+const loginScreen = document.getElementById("loginScreen");
+const app = document.getElementById("app");
+const loginError = document.getElementById("loginError");
+
+// ---------- Auth ----------
+document.getElementById("loginBtn").addEventListener("click", login);
+document.getElementById("loginPassword").addEventListener("keydown", e => { if (e.key === "Enter") login(); });
+
+async function login() {
+  const username = document.getElementById("loginUsername").value.trim();
+  const password = document.getElementById("loginPassword").value;
+  const btn = document.getElementById("loginBtn");
+  loginError.style.display = "none";
+
+  if (!username || !password) {
+    loginError.textContent = "Enter a username and password.";
+    loginError.style.display = "block";
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Signing in...";
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!res.ok) throw new Error(res.status === 401 ? "Incorrect username or password." : "Login failed.");
+    const data = await res.json();
+    token = data.access_token;
+    sessionStorage.setItem("fleet_token", token);
+    enterApp();
+  } catch (e) {
+    loginError.textContent = e.message;
+    loginError.style.display = "block";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Sign in";
+  }
+}
+
+document.getElementById("logoutBtn").addEventListener("click", () => {
+  sessionStorage.removeItem("fleet_token");
+  token = null;
+  clearInterval(refreshTimer);
+  app.classList.remove("active");
+  loginScreen.style.display = "flex";
+});
+
+// ---------- App entry ----------
+function enterApp() {
+  loginScreen.style.display = "none";
+  app.classList.add("active");
+  if (!map) initMap();
+  fetchDevices();
+  refreshTimer = setInterval(fetchDevices, REFRESH_INTERVAL_MS);
+}
+
+function initMap() {
+  map = L.map("map", { zoomControl: true }).setView([20, 0], 2);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: '&copy; OpenStreetMap &copy; CARTO',
+    maxZoom: 19,
+  }).addTo(map);
+}
+
+// ---------- Data fetching ----------
+async function fetchDevices() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/devices/`, {
+      headers: { "Authorization": `Bearer ${token}` },
+    });
+    if (res.status === 401) {
+      sessionStorage.removeItem("fleet_token");
+      token = null;
+      clearInterval(refreshTimer);
+      app.classList.remove("active");
+      loginScreen.style.display = "flex";
+      loginError.textContent = "Session expired. Please sign in again.";
+      loginError.style.display = "block";
+      return;
+    }
+    if (!res.ok) throw new Error("Failed to load devices");
+    devices = await res.json();
+    renderDeviceList();
+    renderMarkers();
+    document.getElementById("lastRefresh").textContent = "updated " + new Date().toLocaleTimeString();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// ---------- Rendering ----------
+function renderDeviceList() {
+  const query = document.getElementById("searchInput").value.trim().toLowerCase();
+  const listEl = document.getElementById("deviceList");
+  const filtered = devices.filter(d => d.name.toLowerCase().includes(query));
+
+  const onlineCount = devices.filter(d => d.online).length;
+  document.getElementById("onlineCount").textContent = `${onlineCount} online / ${devices.length} total`;
+  document.getElementById("onlineDot").style.background = onlineCount > 0 ? "var(--accent-live)" : "var(--accent-stale)";
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = `<div id="emptyState">${devices.length === 0 ? "No devices registered yet." : "No devices match your search."}</div>`;
+    return;
+  }
+
+  filtered.sort((a, b) => (b.online - a.online) || a.name.localeCompare(b.name));
+
+  listEl.innerHTML = filtered.map(d => `
+    <div class="device-row ${d.id === selectedDeviceId ? 'selected' : ''}" data-id="${d.id}">
+      <div class="device-row-top">
+        <span class="status-dot ${d.online ? 'online' : 'offline'}"></span>
+        <span class="device-name">${escapeHtml(d.name)}</span>
+      </div>
+      <div class="device-meta mono">${d.last_seen ? relativeTime(d.last_seen) : 'never reported'}</div>
+    </div>
+  `).join("");
+
+  listEl.querySelectorAll(".device-row").forEach(row => {
+    row.addEventListener("click", () => selectDevice(row.dataset.id));
+  });
+}
+
+function renderMarkers() {
+  const seenIds = new Set();
+  devices.forEach(d => {
+    if (d.last_lat == null || d.last_lng == null) return;
+    seenIds.add(d.id);
+    const color = d.online ? "#34d399" : "#f59e0b";
+    const icon = L.divIcon({
+      className: "",
+      html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #0b1220;box-shadow:0 0 0 2px ${color}55;"></div>`,
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    });
+
+    if (markers[d.id]) {
+      markers[d.id].setLatLng([d.last_lat, d.last_lng]);
+      markers[d.id].setIcon(icon);
+    } else {
+      markers[d.id] = L.marker([d.last_lat, d.last_lng], { icon }).addTo(map);
+    }
+    markers[d.id].bindPopup(`
+      <div class="popup-title">${escapeHtml(d.name)}</div>
+      <div class="popup-row">${d.online ? 'ONLINE' : 'OFFLINE'} &middot; ${d.last_seen ? relativeTime(d.last_seen) : 'never'}</div>
+      <div class="popup-row">${d.last_lat.toFixed(5)}, ${d.last_lng.toFixed(5)}</div>
+    `);
+  });
+
+  Object.keys(markers).forEach(id => {
+    if (!seenIds.has(id)) {
+      map.removeLayer(markers[id]);
+      delete markers[id];
+    }
+  });
+}
+
+function selectDevice(id) {
+  selectedDeviceId = id;
+  renderDeviceList();
+  const d = devices.find(x => x.id === id);
+  if (d && d.last_lat != null && markers[id]) {
+    map.setView([d.last_lat, d.last_lng], 14, { animate: true });
+    markers[id].openPopup();
+  }
+}
+
+document.getElementById("searchInput").addEventListener("input", renderDeviceList);
+
+// ---------- Helpers ----------
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function relativeTime(isoString) {
+  const diffMs = Date.now() - new Date(isoString + "Z").getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
+
+// ---------- Boot ----------
+if (token) {
+  enterApp();
+}
+</script>
+</body>
+</html>
