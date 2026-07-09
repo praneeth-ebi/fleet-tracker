@@ -14,6 +14,26 @@ class Token(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+    org_subdomain: Optional[str] = None  # omit for superadmin login
+
+
+# ---- Organizations ----
+class OrganizationCreate(BaseModel):
+    name: str
+    subdomain: str
+    admin_username: str
+    admin_password: str
+
+
+class OrganizationOut(BaseModel):
+    id: str
+    name: str
+    subdomain: str
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # ---- Users ----

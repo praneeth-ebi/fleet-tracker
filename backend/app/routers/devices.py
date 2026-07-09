@@ -26,8 +26,15 @@ def to_public(device: Device) -> DevicePublicOut:
 
 @router.post("/", response_model=DeviceOut)
 def create_device(payload: DeviceCreate, db: Session = Depends(get_db),
-                   _admin: User = Depends(require_role(Role.admin))):
-    device = Device(name=payload.name)
+                   admin: User = Depends(require_role(Role.admin))):
+    existing = db.query(Device).filter(
+        Device.organization_id == admin.organization_id,
+        Device.name == payload.name,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="A device with that name already exists in this organization")
+
+    device = Device(name=payload.name, organization_id=admin.organization_id)
     db.add(device)
     db.commit()
     db.refresh(device)
@@ -36,17 +43,25 @@ def create_device(payload: DeviceCreate, db: Session = Depends(get_db),
 
 @router.get("/", response_model=List[DevicePublicOut])
 def list_devices(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if user.role == Role.superadmin:
+        raise HTTPException(status_code=400, detail="Superadmin has no organization context; use /organizations/ instead")
+
+    query = db.query(Device).filter(Device.organization_id == user.organization_id)
+
     if user.role == Role.client:
         assigned_ids = [a.device_id for a in user.assigned_devices]
-        devices = db.query(Device).filter(Device.id.in_(assigned_ids)).all()
-    else:
-        devices = db.query(Device).all()
-    return [to_public(d) for d in devices]
+        query = query.filter(Device.id.in_(assigned_ids))
+
+    return [to_public(d) for d in query.all()]
 
 
 @router.get("/{device_id}/history", response_model=List[LocationPingOut])
 def device_history(device_id: str, hours: int = 24 * 30, db: Session = Depends(get_db),
                     user: User = Depends(get_current_user)):
+    device = db.query(Device).filter(Device.id == device_id, Device.organization_id == user.organization_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
     if user.role == Role.client:
         allowed = {a.device_id for a in user.assigned_devices}
         if device_id not in allowed:
@@ -62,9 +77,14 @@ def device_history(device_id: str, hours: int = 24 * 30, db: Session = Depends(g
 
 @router.post("/{device_id}/assign/{user_id}")
 def assign_device(device_id: str, user_id: str, db: Session = Depends(get_db),
-                   _admin: User = Depends(require_role(Role.admin))):
-    if not db.query(Device).filter(Device.id == device_id).first():
+                   admin: User = Depends(require_role(Role.admin))):
+    device = db.query(Device).filter(Device.id == device_id, Device.organization_id == admin.organization_id).first()
+    if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+    target_user = db.query(User).filter(User.id == user_id, User.organization_id == admin.organization_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found in this organization")
+
     db.add(DeviceAssignment(device_id=device_id, user_id=user_id))
     db.commit()
     return {"status": "assigned"}

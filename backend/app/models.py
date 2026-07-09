@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, Enum, ForeignKey, Float, Integer, Boolean, Text
+from sqlalchemy import Column, String, DateTime, Enum, ForeignKey, Float, Integer, Boolean, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -13,29 +13,54 @@ def gen_uuid():
 
 
 class Role(str, enum.Enum):
+    superadmin = "superadmin"  # platform-level: manages Organizations themselves, not tied to one
     admin = "admin"
     operator = "operator"
     client = "client"
+
+
+class Organization(Base):
+    """A tenant -- one client company. Every User (except superadmin) and every Device belongs to exactly one."""
+    __tablename__ = "organizations"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    name = Column(String, nullable=False)
+    subdomain = Column(String, unique=True, index=True, nullable=False)  # e.g. "idkexpress" -> idkexpress.yourapp.com
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    users = relationship("User", back_populates="organization")
+    devices = relationship("Device", back_populates="organization")
 
 
 class User(Base):
     __tablename__ = "users"
 
     id = Column(String, primary_key=True, default=gen_uuid)
-    username = Column(String, unique=True, index=True, nullable=False)
+    # Username is unique per-organization, not globally -- two different
+    # clients can both have a user named "admin". Superadmin users have
+    # organization_id = None and must have a globally unique username.
+    username = Column(String, index=True, nullable=False)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=True)
     hashed_password = Column(String, nullable=False)
     role = Column(Enum(Role), default=Role.operator, nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    organization = relationship("Organization", back_populates="users")
     # Only relevant for role == client: restrict which devices they can see
     assigned_devices = relationship("DeviceAssignment", back_populates="user")
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "username", name="uq_username_per_org"),
+    )
 
 
 class Device(Base):
     __tablename__ = "devices"
 
     id = Column(String, primary_key=True, default=gen_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
     name = Column(String, nullable=False)
     device_token = Column(String, unique=True, default=gen_uuid)  # used by the iPad to auth check-ins
     last_seen = Column(DateTime, nullable=True)
@@ -46,8 +71,13 @@ class Device(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    organization = relationship("Organization", back_populates="devices")
     pings = relationship("LocationPing", back_populates="device")
     assignments = relationship("DeviceAssignment", back_populates="device")
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "name", name="uq_device_name_per_org"),
+    )
 
 
 class DeviceAssignment(Base):

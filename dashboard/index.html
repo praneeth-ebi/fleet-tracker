@@ -114,6 +114,10 @@
     <h1>Fleet Tracker</h1>
     <div class="sub">Sign in to view live vehicle locations</div>
     <div class="field">
+      <label>Organization</label>
+      <input type="text" id="loginOrg" autocomplete="organization" placeholder="e.g. idkexpress">
+    </div>
+    <div class="field">
       <label>Username</label>
       <input type="text" id="loginUsername" autocomplete="username">
     </div>
@@ -150,7 +154,7 @@
 // ============================================================
 // CONFIG
 // ============================================================
-const API_BASE_URL = "https://fleet-tracker-008a.onrender.com"; // <- replace with your live backend URL
+const API_BASE_URL = "https://YOUR-BACKEND.onrender.com"; // <- replace with your live backend URL
 const REFRESH_INTERVAL_MS = 15000;
 
 let token = sessionStorage.getItem("fleet_token") || null;
@@ -164,18 +168,22 @@ const loginScreen = document.getElementById("loginScreen");
 const app = document.getElementById("app");
 const loginError = document.getElementById("loginError");
 
+const rememberedOrg = localStorage.getItem("fleet_remembered_org");
+if (rememberedOrg) document.getElementById("loginOrg").value = rememberedOrg;
+
 // ---------- Auth ----------
 document.getElementById("loginBtn").addEventListener("click", login);
 document.getElementById("loginPassword").addEventListener("keydown", e => { if (e.key === "Enter") login(); });
 
 async function login() {
+  const orgSubdomain = document.getElementById("loginOrg").value.trim().toLowerCase();
   const username = document.getElementById("loginUsername").value.trim();
   const password = document.getElementById("loginPassword").value;
   const btn = document.getElementById("loginBtn");
   loginError.style.display = "none";
 
-  if (!username || !password) {
-    loginError.textContent = "Enter a username and password.";
+  if (!orgSubdomain || !username || !password) {
+    loginError.textContent = "Enter your organization, username, and password.";
     loginError.style.display = "block";
     return;
   }
@@ -186,12 +194,14 @@ async function login() {
     const res = await fetch(`${API_BASE_URL}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, org_subdomain: orgSubdomain }),
     });
-    if (!res.ok) throw new Error(res.status === 401 ? "Incorrect username or password." : "Login failed.");
+    if (!res.ok) throw new Error(res.status === 401 ? "Incorrect organization, username, or password." : "Login failed.");
     const data = await res.json();
     token = data.access_token;
     sessionStorage.setItem("fleet_token", token);
+    sessionStorage.setItem("fleet_org", orgSubdomain);
+    localStorage.setItem("fleet_remembered_org", orgSubdomain);
     enterApp();
   } catch (e) {
     loginError.textContent = e.message;
